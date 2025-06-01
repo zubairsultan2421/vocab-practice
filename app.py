@@ -73,9 +73,10 @@ def index():
 
         <!-- Date Range Input -->
         <div id="dateRangeSection">
-            <p class="mb-2">Enter the date range for practice (format: YYYY-MM-DD)</p>
+            <p class="mb-2">Enter the date range and number of words for practice</p>
             <input type="date" id="startDate" class="input-field" placeholder="Start date">
             <input type="date" id="endDate" class="input-field" placeholder="End date">
+            <input type="number" id="numWords" class="input-field" min="1" placeholder="Number of words" value="2">
             <button onclick="startPractice()" class="btn">Start Practice</button>
         </div>
 
@@ -108,14 +109,19 @@ def index():
         async function startPractice() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
+            const numWords = parseInt(document.getElementById('numWords').value) || 2; // Default to 2 if invalid
 
             if (!startDate || !endDate) {
                 alert('Please enter both start and end dates.');
                 return;
             }
+            if (numWords < 1) {
+                alert('Please enter a valid number of words (minimum 1).');
+                return;
+            }
 
             try {
-                const response = await fetch(`/get_words?start_date=${startDate}&end_date=${endDate}`);
+                const response = await fetch(`/get_words?start_date=${startDate}&end_date=${endDate}&num_words=${numWords}`);
                 const data = await response.json();
                 if (data.error) {
                     alert(data.error);
@@ -123,19 +129,18 @@ def index():
                 }
 
                 words = data.words;
-                if (words.length < 2) {
-                    alert('Not enough words in the date range to practice 2 words.');
-                    return;
+                if (words.length < numWords) {
+                    alert(`Only ${words.length} words available in the date range. Practicing all available words.`);
+                    numWords = words.length; // Adjust to available words
                 }
-
-                words = words.sort(() => 0.5 - Math.random()).slice(0, 2); // Randomly select 2 words
+                words = words.sort(() => 0.5 - Math.random()).slice(0, numWords); // Select specified number of words
                 currentIndex = 0;
                 score = 0;
                 total = 0;
 
                 document.getElementById('dateRangeSection').classList.add('hidden');
                 document.getElementById('practiceSection').classList.remove('hidden');
-                document.getElementById('wordCount').textContent = `Starting vocabulary practice. You will practice 2 words.`;
+                document.getElementById('wordCount').textContent = `Starting vocabulary practice. You will practice ${numWords} words.`;
                 displayWord();
             } catch (error) {
                 alert('Error fetching words: ' + error.message);
@@ -184,6 +189,7 @@ def index():
             document.getElementById('dateRangeSection').classList.remove('hidden');
             document.getElementById('startDate').value = '';
             document.getElementById('endDate').value = '';
+            document.getElementById('numWords').value = '2'; // Reset to default
         }
     </script>
 </body>
@@ -195,7 +201,9 @@ def get_words():
     logger.info("Received request for /get_words")
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
-    logger.debug(f"Start date: {start_date}, End date: {end_date}")
+    num_words = request.args.get('num_words', default=3, type=int)  # Default to 2 if not provided
+
+    logger.debug(f"Start date: {start_date}, End date: {end_date}, Number of words: {num_words}")
 
     try:
         start_date = pd.to_datetime(start_date)
@@ -219,6 +227,11 @@ def get_words():
         return jsonify({'error': 'No words found in the specified date range.'})
 
     words = practice_words[['word', 'type', 'meaning']].to_dict('records')
+    if len(words) < num_words:
+        logger.warning(f"Requested {num_words} words, but only {len(words)} available. Returning all available words.")
+        num_words = len(words)  # Adjust to available words
+    words = random.sample(words, min(num_words, len(words)))  # Randomly select up to num_words
+
     logger.info(f"Returning {len(words)} words")
     return jsonify({'words': words})
 
